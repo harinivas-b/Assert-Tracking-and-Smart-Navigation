@@ -1,0 +1,410 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -----------------------------------------------------------------------------
+// Auth & Identity
+// -----------------------------------------------------------------------------
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  role      Role     @default(VIEWER)
+  firstName String?
+  lastName  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  auditLogs AuditLog[]
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  VIEWER
+}
+
+// -----------------------------------------------------------------------------
+// Location Hierarchy
+// -----------------------------------------------------------------------------
+
+model Organization {
+  id        String     @id @default(uuid())
+  name      String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  
+  buildings Building[]
+}
+
+model Building {
+  id             String       @id @default(uuid())
+  name           String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  
+  floors         Floor[]
+  gateways       BLEGateway[]
+}
+
+model Floor {
+  id         String     @id @default(uuid())
+  name       String
+  level      Int        @default(0)
+  buildingId String
+  building   Building   @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  
+  rooms      Room[]
+  gateways   BLEGateway[]
+}
+
+model Room {
+  id        String     @id @default(uuid())
+  name      String
+  floorId   String
+  floor     Floor      @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  
+  zones     Zone[]
+  gateways  BLEGateway[]
+}
+
+model Zone {
+  id        String     @id @default(uuid())
+  name      String
+  roomId    String
+  room      Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  
+  gateways  BLEGateway[]
+  geofences Geofence[]
+}
+
+// -----------------------------------------------------------------------------
+// Tracking Infrastructure
+// -----------------------------------------------------------------------------
+
+model BLEGateway {
+  id                  String   @id @default(uuid())
+  gatewayId           String   @unique // Hardware ID/MAC
+  name                String
+  status              GatewayStatus @default(ONLINE)
+  ipAddress           String?
+  firmwareVersion     String?
+  heartbeatTimeoutSec Int      @default(30)
+  
+  buildingId String?
+  building   Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+  floorId    String?
+  floor      Floor?    @relation(fields: [floorId], references: [id], onDelete: SetNull)
+  roomId     String?
+  room       Room?     @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  zoneId     String?
+  zone       Zone?     @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  
+  lastSeen   DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  observations BLEObservation[]
+  measurements CalibrationMeasurement[]
+}
+
+enum GatewayStatus {
+  ONLINE
+  OFFLINE
+  MAINTENANCE
+}
+
+// -----------------------------------------------------------------------------
+// Indoor Navigation (Blind Assistance System)
+// -----------------------------------------------------------------------------
+
+model NavigationNode {
+  id            String             @id @default(uuid())
+  nodeId        String             @unique // Human readable e.g., NODE_ENTRANCE
+  name          String             // e.g., "Main Entrance", "Idea Lab Door"
+  nodeType      NavigationNodeType @default(ROOM)
+  bleIdentifier String?            // MAC or BLE Beacon UUID associated with waypoint
+  buildingId    String?
+  roomId        String?
+  floorLevel    Int                @default(0)
+  xCoord        Float?
+  yCoord        Float?
+  audioCue      String?            // Audio prompt description
+  
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  outgoingEdges NavigationEdge[]   @relation("FromNode")
+  incomingEdges NavigationEdge[]   @relation("ToNode")
+}
+
+enum NavigationNodeType {
+  ENTRANCE
+  CORRIDOR
+  JUNCTION
+  ROOM
+  LANDMARK
+  STAIRCASE
+  ELEVATOR
+}
+
+model NavigationEdge {
+  id                String         @id @default(uuid())
+  fromNodeId        String
+  fromNode          NavigationNode @relation("FromNode", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNodeId          String
+  toNode            NavigationNode @relation("ToNode", fields: [toNodeId], references: [id], onDelete: Cascade)
+  
+  distanceMeters    Float          @default(1.0)
+  directionDegrees  Int            @default(0) // 0-360 relative heading
+  instruction       String         // e.g., "Continue straight for 5 meters"
+  accessibilityNotes String?
+  isBidirectional   Boolean        @default(true)
+
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+}
+
+model Tracker {
+  id             String    @id @default(uuid())
+  identifier     String    @unique // MAC or other BLE ID
+  identifierType String    @default("MAC")
+  type           TagType   @default(NON_SMART)
+  status         TagStatus @default(ACTIVE)
+  batteryLevel   Int?
+  lastSeen       DateTime?
+  
+  assignment     AssetTrackerAssignment?
+  observations   BLEObservation[]
+  measurements   CalibrationMeasurement[]
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+enum TagType {
+  SMART
+  NON_SMART
+}
+
+enum TagStatus {
+  ACTIVE
+  INACTIVE
+  LOST
+  LOW_BATTERY
+}
+
+// -----------------------------------------------------------------------------
+// Asset Management
+// -----------------------------------------------------------------------------
+
+model Asset {
+  id           String    @id @default(uuid())
+  name         String
+  category     String?
+  serialNumber String?   @unique
+  department   String?
+  owner        String?
+  status       AssetStatus @default(ACTIVE)
+  
+  assignment   AssetTrackerAssignment?
+  
+  // Last estimated location cache
+  estimatedBuildingId String?
+  estimatedFloorId    String?
+  estimatedRoomId     String?
+  estimatedZoneId     String?
+  locationConfidence  Float?
+  lastLocationUpdate  DateTime?
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  
+  estimates    LocationEstimate[]
+  movements    MovementEvent[]
+  alerts       Alert[]
+  trackingRules TrackingRule[]
+}
+
+enum AssetStatus {
+  ACTIVE
+  IN_USE
+  STORED
+  MISSING
+  MAINTENANCE
+  DECOMMISSIONED
+}
+
+model AssetTrackerAssignment {
+  id        String   @id @default(uuid())
+  assetId   String   @unique
+  asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  trackerId String   @unique
+  tracker   Tracker  @relation(fields: [trackerId], references: [id], onDelete: Cascade)
+  
+  assignedAt DateTime @default(now())
+  assignedBy String?
+}
+
+// -----------------------------------------------------------------------------
+// Observation & Tracking Logs
+// -----------------------------------------------------------------------------
+
+model BLEObservation {
+  id             String     @id @default(uuid())
+  gatewayId      String
+  gateway        BLEGateway @relation(fields: [gatewayId], references: [gatewayId], onDelete: Cascade)
+  trackerId      String
+  tracker        Tracker    @relation(fields: [trackerId], references: [identifier], onDelete: Cascade)
+  rssi           Int
+  timestamp      DateTime   @default(now())
+  metadata       Json?
+}
+
+model LocationEstimate {
+  id         String   @id @default(uuid())
+  assetId    String
+  asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  
+  buildingId String?
+  floorId    String?
+  roomId     String?
+  zoneId     String?
+  
+  confidence Float
+  sources    Json?    // Array of gateway IDs/RSSIs used for this estimate
+  timestamp  DateTime @default(now())
+}
+
+model MovementEvent {
+  id            String   @id @default(uuid())
+  assetId       String
+  asset         Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  
+  fromRoomId    String?
+  toRoomId      String?
+  fromZoneId    String?
+  toZoneId      String?
+  
+  confidence    Float
+  timestamp     DateTime @default(now())
+}
+
+// -----------------------------------------------------------------------------
+// Geofencing & Rules
+// -----------------------------------------------------------------------------
+
+model TrackingRule {
+  id        String   @id @default(uuid())
+  assetId   String
+  asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  ruleType  String   // e.g., "PERMITTED_ZONE", "RESTRICTED_ZONE"
+  zoneId    String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Geofence {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  zoneId      String
+  zone        Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Alert {
+  id          String      @id @default(uuid())
+  type        AlertType
+  severity    Severity
+  assetId     String?
+  asset       Asset?      @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  description String
+  location    String?
+  status      AlertStatus @default(NEW)
+  
+  timestamp   DateTime    @default(now())
+  resolvedAt  DateTime?
+}
+
+enum AlertType {
+  UNAUTHORIZED_MOVEMENT
+  OUT_OF_ZONE
+  UNKNOWN_TAG
+  TAG_OFFLINE
+  GATEWAY_OFFLINE
+  LOW_BATTERY
+  ASSET_MISSING
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AlertStatus {
+  NEW
+  ACKNOWLEDGED
+  RESOLVED
+  DISMISSED
+}
+
+// -----------------------------------------------------------------------------
+// Calibration
+// -----------------------------------------------------------------------------
+
+model CalibrationSession {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  
+  measurements CalibrationMeasurement[]
+}
+
+model CalibrationMeasurement {
+  id          String   @id @default(uuid())
+  sessionId   String
+  session     CalibrationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  gatewayId   String
+  gateway     BLEGateway @relation(fields: [gatewayId], references: [id], onDelete: Cascade)
+  trackerId   String
+  tracker     Tracker    @relation(fields: [trackerId], references: [id], onDelete: Cascade)
+  
+  knownRoomId String?
+  knownDistance Float?
+  rssi        Int
+  timestamp   DateTime @default(now())
+  notes       String?
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  timestamp DateTime @default(now())
+}
