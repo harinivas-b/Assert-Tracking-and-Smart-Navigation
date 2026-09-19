@@ -61,10 +61,4 @@ if (!process.env.VERCEL) {
 }
 
 export { app, prisma };
-export default prisma;
-
-module.exports = app;
-module.exports.__esModule = true;
-module.exports.app = app;
-module.exports.prisma = prisma;
-module.exports.default = prisma;
+export default app;

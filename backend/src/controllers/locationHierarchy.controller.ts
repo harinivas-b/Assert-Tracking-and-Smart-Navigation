@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import prisma from '../server';
+import { prisma } from '../server';
 import { computeAssetStatus } from '../utils/freshness';
 
 export const getBuildings = async (req: Request, res: Response, next: NextFunction) => {
