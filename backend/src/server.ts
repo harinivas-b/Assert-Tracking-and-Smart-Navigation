@@ -22,6 +22,10 @@ app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.get('/', (req: Request, res: Response) => {
+  res.json({ status: 'ok', service: 'tracking-backend' });
+});
+
 // API Routes
 app.use('/api/v1', v1Routes);
 
