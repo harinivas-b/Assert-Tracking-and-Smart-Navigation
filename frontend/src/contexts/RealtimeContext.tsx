@@ -50,9 +50,37 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
+    // Check initial freshness of BLE tracking data from the backend
+    const checkInitialFreshness = async () => {
+      try {
+        const res = await fetch(`${apiBase}/observations/recent`);
+        if (res.ok) {
+          const obs = await res.json();
+          if (Array.isArray(obs) && obs.length > 0) {
+            const latestTime = new Date(obs[0].timestamp);
+            if (!isNaN(latestTime.getTime())) {
+              setLastEventTime(latestTime);
+              const ageSec = (Date.now() - latestTime.getTime()) / 1000;
+              if (ageSec <= 90) {
+                setStatus('LIVE');
+              } else if (ageSec <= 180) {
+                setStatus('STALE');
+              } else {
+                setStatus('OFFLINE');
+              }
+              return;
+            }
+          }
+        }
+        setStatus('OFFLINE');
+      } catch {
+        setStatus('OFFLINE');
+      }
+    };
+
+    checkInitialFreshness();
+
     const connectSSE = () => {
-      setStatus('CONNECTING');
-      
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
       }
@@ -61,19 +89,29 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       eventSourceRef.current = eventSource;
 
       eventSource.onopen = () => {
-        // We only become LIVE when we receive actual data, but opening is a good step.
-        // Let's set it to CONNECTING or leave it until first message.
-        // The requirements state: LIVE = Recent valid SSE telemetry/event received.
-        // So we keep it CONNECTING until onmessage fires, or if we want, we can show a connected state.
-        // Let's just wait for a message to set LIVE.
+        // SSE transport connected, but LIVE status is determined strictly by data freshness
       };
 
       eventSource.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
-          setLastEventTime(new Date());
-          setStatus('LIVE');
           
+          // Only real tracking observations prove BLE data is LIVE
+          if (payload.type === 'hardware.observation' || payload.type === 'asset.location.updated') {
+            const eventTime = payload.data?.timestamp ? new Date(payload.data.timestamp) : new Date();
+            const validTime = isNaN(eventTime.getTime()) ? new Date() : eventTime;
+            setLastEventTime(validTime);
+            
+            const ageSec = (Date.now() - validTime.getTime()) / 1000;
+            if (ageSec <= 90) {
+              setStatus('LIVE');
+            } else if (ageSec <= 180) {
+              setStatus('STALE');
+            } else {
+              setStatus('OFFLINE');
+            }
+          }
+
           const callbacks = subscribers.current.get(payload.type);
           if (callbacks) {
             callbacks.forEach(cb => cb(payload.data));
@@ -95,12 +133,21 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     staleCheckIntervalRef.current = setInterval(() => {
       setLastEventTime(prev => {
-        if (prev && Date.now() - prev.getTime() > 30000 && eventSourceRef.current?.readyState === EventSource.OPEN) {
+        if (!prev) {
+          setStatus('OFFLINE');
+          return null;
+        }
+        const ageSec = (Date.now() - prev.getTime()) / 1000;
+        if (ageSec > 180) {
+          setStatus('OFFLINE');
+        } else if (ageSec > 90) {
           setStatus('STALE');
+        } else {
+          setStatus('LIVE');
         }
         return prev;
       });
-    }, 10000);
+    }, 5000);
 
     return () => {
       if (eventSourceRef.current) {

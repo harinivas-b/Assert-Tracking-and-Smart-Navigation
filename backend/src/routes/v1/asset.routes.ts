@@ -8,12 +8,14 @@ import {
   assignTracker,
   unassignTracker
 } from '../../controllers/asset.controller';
+import { getLiveAssetReaders } from '../../controllers/assetLive.controller';
 import { authenticate, authorize } from '../../middleware/auth';
 
 const router = Router();
 
 router.use(authenticate);
 
+router.get('/live', getLiveAssetReaders);
 router.get('/', getAssets);
 router.get('/:id', getAssetById);
 router.post('/', authorize(['ADMIN', 'MANAGER']), createAsset);

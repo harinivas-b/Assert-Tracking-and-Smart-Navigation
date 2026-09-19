@@ -1,11 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../server';
+import { computeAssetStatus } from '../utils/freshness';
 
 export const getBuildings = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const buildings = await prisma.building.findMany({
       include: {
         floors: {
+          orderBy: { level: 'asc' },
           include: {
             rooms: {
               include: {
@@ -22,22 +24,46 @@ export const getBuildings = async (req: Request, res: Response, next: NextFuncti
 
     const buildingsWithAssetCounts = await Promise.all(
       buildings.map(async (building: any) => {
-        const roomsWithAssets = await Promise.all(
-          building.floors.flatMap((f: any) => f.rooms).map(async (room: any) => {
-            const assetsInRoom = await prisma.asset.findMany({
-              where: { estimatedRoomId: room.id },
-              include: { assignment: { include: { tracker: true } } }
-            });
+        const enrichedFloors = await Promise.all(
+          building.floors.map(async (floor: any) => {
+            const enrichedRooms = await Promise.all(
+              floor.rooms.map(async (room: any) => {
+                const assetsInRoom = await prisma.asset.findMany({
+                  where: { estimatedRoomId: room.id },
+                  include: { assignment: { include: { tracker: true } } }
+                });
+
+                const activeAssets = assetsInRoom.map((asset: any) => {
+                  const trackerLastSeen = asset.assignment?.tracker?.lastSeen || asset.lastLocationUpdate;
+                  const dynamicStatus = computeAssetStatus(trackerLastSeen, asset.status);
+                  return {
+                    ...asset,
+                    status: dynamicStatus,
+                    rawStatus: asset.status,
+                    lastSeen: trackerLastSeen
+                  };
+                });
+
+                return {
+                  ...room,
+                  presentAssets: activeAssets
+                };
+              })
+            );
+
             return {
-              ...room,
-              presentAssets: assetsInRoom
+              ...floor,
+              rooms: enrichedRooms
             };
           })
         );
 
+        const allRoomsWithAssets = enrichedFloors.flatMap((f: any) => f.rooms);
+
         return {
           ...building,
-          rooms: roomsWithAssets
+          floors: enrichedFloors,
+          rooms: allRoomsWithAssets
         };
       })
     );
@@ -76,7 +102,9 @@ export const createBuilding = async (req: Request, res: Response, next: NextFunc
         floors: {
           create: [
             { name: 'Ground Floor', level: 0 },
-            { name: 'First Floor', level: 1 }
+            { name: 'First Floor', level: 1 },
+            { name: 'Second Floor', level: 2 },
+            { name: 'Third Floor', level: 3 }
           ]
         }
       },

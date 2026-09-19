@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../server';
 import { realtimeService } from '../services/realtimeService';
+import { computeGatewayStatus } from '../utils/freshness';
 
 export const getGateways = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -15,21 +16,17 @@ export const getGateways = async (req: Request, res: Response, next: NextFunctio
     });
 
     const now = new Date().getTime();
-    const fiveMinsAgo = new Date(now - 5 * 60 * 1000);
+    const activeWindowAgo = new Date(now - 5 * 60 * 1000); // 5-minute detection window
 
     const enrichedGateways = await Promise.all(
       gateways.map(async (gateway: any) => {
-        const timeoutMs = (gateway.heartbeatTimeoutSec || 30) * 1000;
-        const lastSeenMs = gateway.lastSeen ? new Date(gateway.lastSeen).getTime() : 0;
-        const isOnline = lastSeenMs > 0 && (now - lastSeenMs <= timeoutMs);
-
-        const currentStatus = isOnline ? 'ONLINE' : (gateway.lastSeen ? 'OFFLINE' : 'UNKNOWN');
+        const currentStatus = computeGatewayStatus(gateway.lastSeen, gateway.heartbeatTimeoutSec || 90);
 
         const recentObservations = await prisma.bLEObservation.groupBy({
           by: ['trackerId'],
           where: {
             gatewayId: gateway.gatewayId,
-            timestamp: { gte: fiveMinsAgo }
+            timestamp: { gte: activeWindowAgo }
           }
         });
 
@@ -64,7 +61,12 @@ export const getGatewayById = async (req: Request, res: Response, next: NextFunc
       return res.status(404).json({ error: 'Gateway not found' });
     }
 
-    res.json(gateway);
+    const currentStatus = computeGatewayStatus(gateway.lastSeen, gateway.heartbeatTimeoutSec || 90);
+
+    res.json({
+      ...gateway,
+      status: currentStatus
+    });
   } catch (error) {
     next(error);
   }

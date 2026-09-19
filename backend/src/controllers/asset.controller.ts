@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../server';
+import { computeAssetStatus } from '../utils/freshness';
 
 export const getAssets = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -36,8 +37,14 @@ export const getAssets = async (req: Request, res: Response, next: NextFunction)
       const locationParts = [buildingName, floorName, roomName].filter(Boolean);
       const locationName = roomName || asset.estimatedZoneId || (locationParts.length > 0 ? locationParts.join(' - ') : 'Unknown');
 
+      const trackerLastSeen = asset.assignment?.tracker?.lastSeen || asset.lastLocationUpdate;
+      const dynamicStatus = computeAssetStatus(trackerLastSeen, asset.status);
+
       return {
         ...asset,
+        status: dynamicStatus,
+        rawStatus: asset.status,
+        lastSeen: trackerLastSeen,
         roomName,
         floorName,
         buildingName,
@@ -76,8 +83,14 @@ export const getAssetById = async (req: Request, res: Response, next: NextFuncti
       roomName = room?.name || null;
     }
 
+    const trackerLastSeen = asset.assignment?.tracker?.lastSeen || asset.lastLocationUpdate;
+    const dynamicStatus = computeAssetStatus(trackerLastSeen, asset.status);
+
     res.json({
       ...asset,
+      status: dynamicStatus,
+      rawStatus: asset.status,
+      lastSeen: trackerLastSeen,
       roomName,
       locationName: roomName || asset.estimatedZoneId || 'Unknown'
     });

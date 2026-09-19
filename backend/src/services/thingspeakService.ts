@@ -32,40 +32,85 @@ interface ParsedThingSpeakRecord {
   gatewayId: string;
 }
 
+export interface ThingSpeakChannelConfig {
+  channelId: string;
+  apiKey?: string;
+  defaultRoom: string;
+  gatewayId: string;
+  name: string;
+}
+
 class ThingSpeakService {
-  private lastProcessedEntryId: number = 0;
+  private lastProcessedEntryIds = new Map<string, number>();
   private pollIntervalTimer: NodeJS.Timeout | null = null;
   private isPollingActive: boolean = false;
   private isProcessing: boolean = false;
 
-  public async getLatestStoredEntryId(): Promise<number> {
+  public getConfiguredChannels(): ThingSpeakChannelConfig[] {
+    const channels: ThingSpeakChannelConfig[] = [];
+
+    // Reader 2 (ROOM2)
+    const ch2 = (process.env.THINGSPEAK_CHANNEL_ID || '3042355').trim();
+    if (ch2) {
+      channels.push({
+        channelId: ch2,
+        apiKey: (process.env.THINGSPEAK_READ_API_KEY || 'VO5ZH5KJ1XCA71GN').trim(),
+        defaultRoom: 'ROOM2',
+        gatewayId: 'GW_ROOM2',
+        name: 'Reader 2 (ROOM2)'
+      });
+    }
+
+    // Reader 3 (ROOM3)
+    const ch3 = (process.env.READER3_THINGSPEAK_CHANNEL_ID || '2995714').trim();
+    if (ch3) {
+      channels.push({
+        channelId: ch3,
+        apiKey: (process.env.READER3_THINGSPEAK_READ_API_KEY || '5W2CC3C22YESJR5R').trim(),
+        defaultRoom: 'ROOM3',
+        gatewayId: 'GATEWAY1',
+        name: 'Reader 3'
+      });
+    }
+
+    return channels;
+  }
+
+  public async getLatestStoredEntryIdForChannel(channelId: string): Promise<number> {
     try {
-      const latestObs = await prisma.bLEObservation.findFirst({
+      const recentObservations = await prisma.bLEObservation.findMany({
+        take: 300,
         orderBy: { timestamp: 'desc' },
         select: { metadata: true }
       });
 
-      if (latestObs?.metadata && typeof latestObs.metadata === 'object') {
-        const meta = latestObs.metadata as any;
-        if (meta.entryId && typeof meta.entryId === 'number') {
-          return meta.entryId;
+      for (const obs of recentObservations) {
+        if (obs?.metadata && typeof obs.metadata === 'object') {
+          const meta = obs.metadata as any;
+          if (String(meta.channelId) === String(channelId) && typeof meta.entryId === 'number') {
+            return meta.entryId;
+          }
         }
       }
     } catch (err) {
-      console.warn('[ThingSpeakService] Could not determine latest entryId from DB:', err);
+      console.warn(`[ThingSpeakService] Could not determine latest entryId for channel ${channelId}:`, err);
     }
     return 0;
   }
 
   public async initialize(): Promise<void> {
-    this.lastProcessedEntryId = await this.getLatestStoredEntryId();
-    console.log(`[ThingSpeakService] Initialized. Last processed entry ID: ${this.lastProcessedEntryId}`);
+    const channels = this.getConfiguredChannels();
+    for (const ch of channels) {
+      const lastId = await this.getLatestStoredEntryIdForChannel(ch.channelId);
+      this.lastProcessedEntryIds.set(ch.channelId, lastId);
+      console.log(`[ThingSpeakService] Initialized ${ch.name} (${ch.channelId}). Last processed entry ID: ${lastId}`);
+    }
   }
 
   /**
    * Parse a single feed row by inspecting channel field labels, or fallback to value heuristics.
    */
-  public parseFeedRow(feed: ThingSpeakFeed, channelMeta?: ThingSpeakChannelMeta): ParsedThingSpeakRecord | null {
+  public parseFeedRow(feed: ThingSpeakFeed, channelMeta?: ThingSpeakChannelMeta, defaultRoom?: string): ParsedThingSpeakRecord | null {
     if (!feed || !feed.entry_id) return null;
 
     let mac: string | undefined;
@@ -85,7 +130,7 @@ class ThingSpeakService {
 
         if (metaLabel === 'MAC' || metaLabel.includes('MAC ADDRESS') || metaLabel === 'TAG MAC') {
           mac = value;
-        } else if (metaLabel === 'MAC NAME' || metaLabel.includes('TAG NAME') || metaLabel.includes('DEVICE NAME')) {
+        } else if (metaLabel === 'MAC NAME' || metaLabel.includes('TAG NAME') || metaLabel.includes('DEVICE NAME') || metaLabel === 'TAG') {
           macName = value;
         } else if (metaLabel === 'RSSI' || metaLabel.includes('SIGNAL')) {
           const parsedRssi = parseInt(value, 10);
@@ -126,7 +171,7 @@ class ThingSpeakService {
         continue;
       }
 
-      // ROOM format: starts with ROOM (e.g. ROOM2, ROOM1, ROOM 101)
+      // ROOM format: starts with ROOM (e.g. ROOM2, ROOM3, ROOM1)
       if (!room && /^ROOM\s*\w*/i.test(strVal)) {
         room = strVal.toUpperCase().replace(/\s+/g, '');
         continue;
@@ -149,8 +194,8 @@ class ThingSpeakService {
       }
     }
 
-    const resolvedRoom = room || 'ROOM_DEFAULT';
-    const gatewayId = `GW_${resolvedRoom.toUpperCase()}`;
+    const resolvedRoom = room || defaultRoom || 'ROOM_DEFAULT';
+    const gatewayId = resolvedRoom.toUpperCase() === 'ROOM3' ? 'GATEWAY1' : `GW_${resolvedRoom.toUpperCase()}`;
 
     return {
       time: feed.created_at,
@@ -171,84 +216,105 @@ class ThingSpeakService {
     const cleanRoomName = roomName.trim();
     const cleanGatewayId = gatewayId.trim().toUpperCase();
 
-    // Check if gateway already exists
+    let readerDisplayName = cleanRoomName.toUpperCase() === 'ROOM2' ? 'Reader 2 (ROOM2)' : `Reader (${cleanRoomName})`;
+    if (cleanGatewayId === 'GATEWAY1' || cleanGatewayId === 'READER3' || cleanGatewayId === 'GW_ROOM3' || cleanRoomName.toUpperCase() === 'ROOM3') {
+      readerDisplayName = 'Reader 3';
+    }
+
+    // Check if room with this name already exists
+    let room = await prisma.room.findFirst({
+      where: { name: cleanRoomName },
+      include: { floor: { include: { building: true } } }
+    });
+
+    if (!room) {
+      let groundFloor = await prisma.floor.findFirst({ where: { level: 0 } });
+      if (!groundFloor) {
+        let building = await prisma.building.findFirst();
+        groundFloor = await prisma.floor.create({
+          data: { name: 'Ground Floor', level: 0, buildingId: building?.id || '' }
+        });
+      }
+      room = await prisma.room.create({
+        data: { name: cleanRoomName, floorId: groundFloor.id },
+        include: { floor: { include: { building: true } } }
+      });
+      console.log(`[ThingSpeakService] Created room: ${cleanRoomName}`);
+    }
+
+    // Special mapping for Reader 3 (ROOM3 / GATEWAY1)
+    if (cleanRoomName.toUpperCase() === 'ROOM3' || cleanGatewayId === 'GATEWAY1' || cleanGatewayId === 'GW_ROOM3') {
+      const existingR3 = await prisma.bLEGateway.findFirst({
+        where: {
+          OR: [
+            { gatewayId: 'GATEWAY1' },
+            { gatewayId: 'GW_ROOM3' },
+            { gatewayId: 'READER3' }
+          ]
+        }
+      });
+      if (existingR3) {
+        if (existingR3.name !== 'Reader 3' || existingR3.roomId !== room.id) {
+          await prisma.bLEGateway.update({
+            where: { id: existingR3.id },
+            data: {
+              name: 'Reader 3',
+              roomId: room.id,
+              floorId: room.floorId
+            }
+          });
+        }
+        return existingR3.gatewayId;
+      }
+    }
+
+    // Check if gateway already exists by gatewayId
     const existingGateway = await prisma.bLEGateway.findUnique({
       where: { gatewayId: cleanGatewayId }
     });
 
     if (existingGateway) {
-      return existingGateway.gatewayId;
-    }
-
-    // Check if room with this name already exists
-    let room = await prisma.room.findFirst({
-      where: { name: cleanRoomName }
-    });
-
-    if (!room) {
-      // Find default building and floor
-      let floor = await prisma.floor.findFirst();
-      if (!floor) {
-        let building = await prisma.building.findFirst();
-        if (!building) {
-          let org = await prisma.organization.findFirst();
-          if (!org) {
-            org = await prisma.organization.create({ data: { name: 'Campus' } });
+      // Keep name and room updated
+      if (existingGateway.name !== readerDisplayName || existingGateway.roomId !== room.id) {
+        await prisma.bLEGateway.update({
+          where: { id: existingGateway.id },
+          data: {
+            name: readerDisplayName,
+            roomId: room.id,
+            buildingId: room.floor?.buildingId || undefined,
+            floorId: room.floorId
           }
-          building = await prisma.building.create({
-            data: { name: 'Main Campus Building', organizationId: org.id }
-          });
-        }
-        floor = await prisma.floor.create({
-          data: { name: 'Ground Floor', level: 0, buildingId: building.id }
         });
       }
-
-      room = await prisma.room.create({
-        data: { name: cleanRoomName, floorId: floor.id }
-      });
-      console.log(`[ThingSpeakService] Created room: ${cleanRoomName}`);
+      return existingGateway.gatewayId;
     }
 
     // Create gateway for this room
     const createdGateway = await prisma.bLEGateway.create({
       data: {
         gatewayId: cleanGatewayId,
-        name: `Reader (${cleanRoomName})`,
+        name: readerDisplayName,
         roomId: room.id,
-        status: 'ONLINE',
-        lastSeen: new Date()
+        buildingId: room.floor?.buildingId || undefined,
+        floorId: room.floorId,
+        status: 'OFFLINE',
+        lastSeen: null
       }
     });
 
-    console.log(`[ThingSpeakService] Created BLE Gateway: ${cleanGatewayId} assigned to ${cleanRoomName}`);
+    console.log(`[ThingSpeakService] Created BLE Gateway: ${cleanGatewayId} (${readerDisplayName}) assigned to ${cleanRoomName}`);
     return createdGateway.gatewayId;
   }
 
   /**
-   * Fetch recent feeds from ThingSpeak and process new entries
+   * Poll a single channel and process new entries
    */
-  public async fetchAndProcess(forceFromEntryId?: number): Promise<{ fetched: number; processed: number; lastEntryId: number; error?: string }> {
-    const channelId = process.env.THINGSPEAK_CHANNEL_ID?.trim();
-    const apiKey = process.env.THINGSPEAK_READ_API_KEY?.trim();
+  private async pollSingleChannel(config: ThingSpeakChannelConfig, forceFromEntryId?: number): Promise<{ fetched: number; processed: number; lastEntryId: number }> {
+    let lastId = forceFromEntryId !== undefined ? forceFromEntryId : (this.lastProcessedEntryIds.get(config.channelId) || 0);
 
-    if (forceFromEntryId !== undefined) {
-      this.lastProcessedEntryId = forceFromEntryId;
-    }
-
-    if (!channelId) {
-      return { fetched: 0, processed: 0, lastEntryId: this.lastProcessedEntryId, error: 'THINGSPEAK_CHANNEL_ID is not configured' };
-    }
-
-    if (this.isProcessing) {
-      return { fetched: 0, processed: 0, lastEntryId: this.lastProcessedEntryId };
-    }
-
-    this.isProcessing = true;
+    const url = `https://api.thingspeak.com/channels/${config.channelId}/feeds.json?results=25${config.apiKey ? `&api_key=${config.apiKey}` : ''}`;
 
     try {
-      const url = `https://api.thingspeak.com/channels/${channelId}/feeds.json?results=25${apiKey ? `&api_key=${apiKey}` : ''}`;
-      
       const response = await fetch(url, {
         headers: { 'Accept': 'application/json' },
         signal: AbortSignal.timeout(10000)
@@ -256,8 +322,8 @@ class ThingSpeakService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[ThingSpeakService] HTTP ${response.status} from ThingSpeak: ${errorText}`);
-        return { fetched: 0, processed: 0, lastEntryId: this.lastProcessedEntryId, error: `ThingSpeak HTTP ${response.status}` };
+        console.error(`[ThingSpeakService] HTTP ${response.status} from ThingSpeak for ${config.name} (${config.channelId}): ${errorText}`);
+        return { fetched: 0, processed: 0, lastEntryId: lastId };
       }
 
       const data = await response.json() as { channel?: ThingSpeakChannelMeta; feeds?: ThingSpeakFeed[] };
@@ -265,16 +331,12 @@ class ThingSpeakService {
       const channelMeta = data.channel;
 
       let processedCount = 0;
-
-      // Filter feeds strictly newer than lastProcessedEntryId
-      const newFeeds = feeds.filter(f => f.entry_id > this.lastProcessedEntryId);
+      const newFeeds = feeds.filter(f => f.entry_id > lastId);
 
       for (const feed of newFeeds) {
-        const record = this.parseFeedRow(feed, channelMeta);
+        const record = this.parseFeedRow(feed, channelMeta, config.defaultRoom);
         if (!record) {
-          if (feed.entry_id > this.lastProcessedEntryId) {
-            this.lastProcessedEntryId = feed.entry_id;
-          }
+          if (feed.entry_id > lastId) lastId = feed.entry_id;
           continue;
         }
 
@@ -291,25 +353,60 @@ class ThingSpeakService {
             adc: record.adc,
             room: record.room,
             entryId: record.entryId,
+            channelId: config.channelId,
             source: 'thingspeak',
             reportedAt: record.time
           }
         );
 
-        if (record.entryId > this.lastProcessedEntryId) {
-          this.lastProcessedEntryId = record.entryId;
+        if (record.entryId > lastId) {
+          lastId = record.entryId;
         }
         processedCount++;
       }
 
+      this.lastProcessedEntryIds.set(config.channelId, lastId);
+      return { fetched: feeds.length, processed: processedCount, lastEntryId: lastId };
+    } catch (err: any) {
+      console.error(`[ThingSpeakService] Error polling ${config.name}:`, err.message || err);
+      return { fetched: 0, processed: 0, lastEntryId: lastId };
+    }
+  }
+
+  /**
+   * Fetch recent feeds from all configured ThingSpeak channels
+   */
+  public async fetchAndProcess(forceFromEntryId?: number, targetChannelId?: string): Promise<{ fetched: number; processed: number; lastEntryId: number; error?: string }> {
+    if (this.isProcessing) {
+      return { fetched: 0, processed: 0, lastEntryId: 0 };
+    }
+
+    this.isProcessing = true;
+    let totalFetched = 0;
+    let totalProcessed = 0;
+    let latestEntryId = 0;
+
+    try {
+      const channels = this.getConfiguredChannels();
+      const channelsToPoll = targetChannelId ? channels.filter(c => c.channelId === targetChannelId) : channels;
+
+      for (const config of channelsToPoll) {
+        const res = await this.pollSingleChannel(config, forceFromEntryId);
+        totalFetched += res.fetched;
+        totalProcessed += res.processed;
+        if (res.lastEntryId > latestEntryId) {
+          latestEntryId = res.lastEntryId;
+        }
+      }
+
       return {
-        fetched: feeds.length,
-        processed: processedCount,
-        lastEntryId: this.lastProcessedEntryId
+        fetched: totalFetched,
+        processed: totalProcessed,
+        lastEntryId: latestEntryId
       };
     } catch (err: any) {
-      console.error('[ThingSpeakService] Error polling ThingSpeak:', err.message || err);
-      return { fetched: 0, processed: 0, lastEntryId: this.lastProcessedEntryId, error: err.message };
+      console.error('[ThingSpeakService] Error during synchronization:', err.message || err);
+      return { fetched: totalFetched, processed: totalProcessed, lastEntryId: latestEntryId, error: err.message };
     } finally {
       this.isProcessing = false;
     }
@@ -319,7 +416,7 @@ class ThingSpeakService {
     if (this.isPollingActive) return;
 
     this.isPollingActive = true;
-    console.log(`[ThingSpeakService] Starting background polling worker (every ${intervalMs / 1000}s)...`);
+    console.log(`[ThingSpeakService] Starting background polling worker (every ${intervalMs / 1000}s) across configured channels...`);
 
     // Run first sync immediately
     this.fetchAndProcess().catch(console.error);
@@ -339,10 +436,16 @@ class ThingSpeakService {
   }
 
   public getStatus() {
+    const channels = this.getConfiguredChannels();
+    const channelStatuses = channels.map(c => ({
+      name: c.name,
+      channelId: c.channelId,
+      lastProcessedEntryId: this.lastProcessedEntryIds.get(c.channelId) || 0
+    }));
+
     return {
       active: this.isPollingActive,
-      lastProcessedEntryId: this.lastProcessedEntryId,
-      channelIdConfigured: Boolean(process.env.THINGSPEAK_CHANNEL_ID?.trim())
+      channels: channelStatuses
     };
   }
 }

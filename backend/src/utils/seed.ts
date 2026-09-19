@@ -33,15 +33,69 @@ export const seedDatabase = async (prisma: PrismaClient) => {
                     { name: 'Maker Space' },
                     { name: 'Main Entrance' },
                     { name: 'Central Corridor' },
-                    { name: 'Junction A' }
+                    { name: 'Junction A' },
+                    { name: 'ROOM2' }
                   ]
                 }
-              }
+              },
+              { name: 'First Floor', level: 1 },
+              { name: 'Second Floor', level: 2 },
+              { name: 'Third Floor', level: 3 }
             ]
           }
         }
       });
-      console.log('[Seed] Created Engineering Building with Ground Floor rooms');
+      console.log('[Seed] Created Engineering Building with 4 floors');
+    } else {
+      // Ensure all 4 floors exist for the building
+      const existingFloors = await prisma.floor.findMany({ where: { buildingId: building.id } });
+      const floorLevels = new Set(existingFloors.map(f => f.level));
+      const requiredFloors = [
+        { name: 'Ground Floor', level: 0 },
+        { name: 'First Floor', level: 1 },
+        { name: 'Second Floor', level: 2 },
+        { name: 'Third Floor', level: 3 }
+      ];
+      for (const rf of requiredFloors) {
+        if (!floorLevels.has(rf.level)) {
+          await prisma.floor.create({
+            data: { name: rf.name, level: rf.level, buildingId: building.id }
+          });
+          console.log(`[Seed] Added missing floor: ${rf.name} (Level ${rf.level})`);
+        }
+      }
+    }
+
+    const groundFloor = await prisma.floor.findFirst({
+      where: { buildingId: building.id, level: 0 }
+    });
+
+    // Ensure ROOM2 exists on Ground Floor
+    let room2 = await prisma.room.findFirst({ where: { name: 'ROOM2' } });
+    if (!room2 && groundFloor) {
+      room2 = await prisma.room.create({
+        data: { name: 'ROOM2', floorId: groundFloor.id }
+      });
+      console.log('[Seed] Created room: ROOM2 on Ground Floor');
+    } else if (room2 && groundFloor && room2.floorId !== groundFloor.id) {
+      await prisma.room.update({
+        where: { id: room2.id },
+        data: { floorId: groundFloor.id }
+      });
+    }
+
+    // Ensure ROOM3 exists on Ground Floor
+    let room3 = await prisma.room.findFirst({ where: { name: 'ROOM3' } });
+    if (!room3 && groundFloor) {
+      room3 = await prisma.room.create({
+        data: { name: 'ROOM3', floorId: groundFloor.id }
+      });
+      console.log('[Seed] Created room: ROOM3 on Ground Floor');
+    } else if (room3 && groundFloor && room3.floorId !== groundFloor.id) {
+      await prisma.room.update({
+        where: { id: room3.id },
+        data: { floorId: groundFloor.id }
+      });
     }
 
     // Get created rooms
@@ -51,17 +105,40 @@ export const seedDatabase = async (prisma: PrismaClient) => {
     const corridorRoom = await prisma.room.findFirst({ where: { name: 'Central Corridor' } });
     const junctionRoom = await prisma.room.findFirst({ where: { name: 'Junction A' } });
 
-    // 3. Gateways: GATEWAY1 (Idea Lab), GATEWAY2 (Maker Space)
-    let gw1 = await prisma.bLEGateway.findUnique({ where: { gatewayId: 'GATEWAY1' } });
-    if (!gw1 && ideaLab && building) {
+    // 3. Gateways:
+    // Gateway 1 (Reader 3) and Gateway 2 are configured in database
+    // Status and lastSeen are dynamically determined by real observations
+    let gw1 = await prisma.bLEGateway.findFirst({
+      where: {
+        OR: [
+          { gatewayId: 'GATEWAY1' },
+          { gatewayId: 'READER3' },
+          { gatewayId: 'GW_ROOM3' }
+        ]
+      }
+    });
+    const reader3RoomId = room3?.id || ideaLab?.id;
+    if (!gw1 && reader3RoomId && building) {
       gw1 = await prisma.bLEGateway.create({
         data: {
           gatewayId: 'GATEWAY1',
-          name: 'Gateway 1 (Idea Lab)',
+          name: 'Reader 3',
           buildingId: building.id,
-          roomId: ideaLab.id,
-          status: 'ONLINE',
-          lastSeen: new Date()
+          roomId: reader3RoomId,
+          floorId: groundFloor?.id,
+          status: 'OFFLINE',
+          lastSeen: null
+        }
+      });
+      console.log('[Seed] Registered Reader 3 (GATEWAY1) in ROOM3');
+    } else if (gw1 && reader3RoomId) {
+      await prisma.bLEGateway.update({
+        where: { id: gw1.id },
+        data: {
+          name: 'Reader 3',
+          roomId: reader3RoomId,
+          floorId: groundFloor?.id,
+          buildingId: building?.id
         }
       });
     }
@@ -74,8 +151,45 @@ export const seedDatabase = async (prisma: PrismaClient) => {
           name: 'Gateway 2 (Maker Space)',
           buildingId: building.id,
           roomId: makerSpace.id,
-          status: 'ONLINE',
-          lastSeen: new Date()
+          floorId: groundFloor?.id,
+          status: 'OFFLINE',
+          lastSeen: null
+        }
+      });
+    } else if (gw2) {
+      await prisma.bLEGateway.update({
+        where: { id: gw2.id },
+        data: {
+          name: 'Gateway 2 (Maker Space)',
+          roomId: makerSpace?.id,
+          floorId: groundFloor?.id,
+          buildingId: building?.id
+        }
+      });
+    }
+
+    // Reader 2 (ROOM2)
+    let gwRoom2 = await prisma.bLEGateway.findUnique({ where: { gatewayId: 'GW_ROOM2' } });
+    if (!gwRoom2 && room2 && building) {
+      gwRoom2 = await prisma.bLEGateway.create({
+        data: {
+          gatewayId: 'GW_ROOM2',
+          name: 'Reader 2 (ROOM2)',
+          buildingId: building.id,
+          floorId: groundFloor?.id,
+          roomId: room2.id,
+          status: 'OFFLINE',
+          lastSeen: null
+        }
+      });
+    } else if (gwRoom2 && room2) {
+      await prisma.bLEGateway.update({
+        where: { id: gwRoom2.id },
+        data: {
+          name: 'Reader 2 (ROOM2)',
+          roomId: room2.id,
+          buildingId: building.id,
+          floorId: groundFloor?.id
         }
       });
     }
@@ -220,6 +334,19 @@ export const seedDatabase = async (prisma: PrismaClient) => {
       }
     });
 
+    const nRoom2 = await prisma.navigationNode.upsert({
+      where: { nodeId: 'NODE_ROOM2' },
+      update: {},
+      create: {
+        nodeId: 'NODE_ROOM2',
+        name: 'Room 2',
+        nodeType: 'ROOM',
+        bleIdentifier: 'BLE_NODE_6',
+        roomId: room2?.id,
+        audioCue: 'Room 2 entrance.'
+      }
+    });
+
     // Edges connecting nodes
     const edgeCount = await prisma.navigationEdge.count();
     if (edgeCount === 0) {
@@ -254,10 +381,41 @@ export const seedDatabase = async (prisma: PrismaClient) => {
             instruction: 'Turn right at Junction A and walk 5 meters into Maker Space.',
             directionDegrees: 90,
             isBidirectional: true
+          },
+          {
+            fromNodeId: nJunction.id,
+            toNodeId: nRoom2.id,
+            distanceMeters: 6.0,
+            instruction: 'At Junction A, proceed straight 6 meters into Room 2.',
+            directionDegrees: 0,
+            isBidirectional: true
           }
         ]
       });
       console.log('[Seed] Navigation graph edges created successfully.');
+    } else {
+      // Ensure Room 2 is connected
+      const room2Edge = await prisma.navigationEdge.findFirst({
+        where: {
+          OR: [
+            { fromNodeId: nJunction.id, toNodeId: nRoom2.id },
+            { fromNodeId: nRoom2.id, toNodeId: nJunction.id }
+          ]
+        }
+      });
+      if (!room2Edge) {
+        await prisma.navigationEdge.create({
+          data: {
+            fromNodeId: nJunction.id,
+            toNodeId: nRoom2.id,
+            distanceMeters: 6.0,
+            instruction: 'At Junction A, proceed straight 6 meters into Room 2.',
+            directionDegrees: 0,
+            isBidirectional: true
+          }
+        });
+        console.log('[Seed] Connected Room 2 to Junction A in navigation graph.');
+      }
     }
 
     console.log('[Seed] Database initial seed completed successfully.');

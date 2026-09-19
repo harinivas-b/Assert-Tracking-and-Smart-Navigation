@@ -147,6 +147,16 @@ const Tags: React.FC = () => {
                         <Tag size={16} color="var(--primary)" />
                         {tracker.identifier}
                       </div>
+                      {(tracker as any).macName && (tracker as any).macName !== tracker.identifier && (
+                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#4f46e5', marginLeft: '1.5rem', marginTop: '0.125rem' }}>
+                          Name: {(tracker as any).macName}
+                        </div>
+                      )}
+                      {(tracker as any).rssi !== undefined && (tracker as any).rssi !== null && (
+                        <div style={{ fontSize: '0.75rem', fontWeight: 500, color: (tracker as any).rssi > -65 ? '#15803d' : ((tracker as any).rssi > -80 ? '#b45309' : '#b91c1c'), marginLeft: '1.5rem' }}>
+                          RSSI: {(tracker as any).rssi} dBm
+                        </div>
+                      )}
                       {tracker.lastSeen && (
                         <div style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--gray-400)', marginLeft: '1.5rem', marginTop: '0.125rem' }}>
                           Last seen: {new Date(tracker.lastSeen).toLocaleTimeString()}
@@ -169,10 +179,10 @@ const Tags: React.FC = () => {
                       <span style={{
                         fontSize: '0.75rem',
                         fontWeight: 600,
-                        padding: '0.25rem 0.5rem',
+                        padding: '0.25rem 0.625rem',
                         borderRadius: '1rem',
-                        backgroundColor: tracker.status === 'ACTIVE' ? '#dcfce7' : '#fee2e2',
-                        color: tracker.status === 'ACTIVE' ? '#15803d' : '#b91c1c'
+                        backgroundColor: tracker.status === 'ACTIVE' ? '#dcfce7' : (tracker.status === 'STALE' ? '#fef3c7' : '#fee2e2'),
+                        color: tracker.status === 'ACTIVE' ? '#15803d' : (tracker.status === 'STALE' ? '#b45309' : '#b91c1c')
                       }}>
                         {tracker.status}
                       </span>
@@ -190,11 +200,18 @@ const Tags: React.FC = () => {
                             <Box size={16} color="var(--primary)" />
                             {assignedAsset.name}
                           </div>
-                          {currentRoom && (
+                          {(currentRoom || (tracker as any).room) && (
                             <div style={{ fontSize: '0.75rem', color: 'var(--primary)', marginLeft: '1.375rem', marginTop: '0.125rem' }}>
-                              Room: {currentRoom}
+                              Room: {currentRoom || (tracker as any).room}
                             </div>
                           )}
+                        </div>
+                      ) : (tracker as any).room ? (
+                        <div>
+                          <span style={{ color: 'var(--gray-400)', fontStyle: 'italic' }}>Unassigned</span>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--primary)', marginTop: '0.125rem' }}>
+                            Room: {(tracker as any).room}
+                          </div>
                         </div>
                       ) : (
                         <span style={{ color: 'var(--gray-400)', fontStyle: 'italic' }}>Unassigned</span>

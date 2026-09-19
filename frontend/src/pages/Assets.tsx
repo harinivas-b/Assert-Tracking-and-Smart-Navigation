@@ -124,14 +124,16 @@ const Assets = () => {
                     </td>
                     <td style={{ padding: '1rem' }}>
                       <span style={{ 
-                        padding: '0.25rem 0.5rem', 
+                        padding: '0.25rem 0.625rem', 
                         borderRadius: 'var(--radius-full)', 
                         fontSize: '0.75rem',
-                        fontWeight: 500,
-                        backgroundColor: asset.status === 'ACTIVE' ? 'var(--success-bg)' : 
-                                       asset.status === 'MISSING' ? 'var(--danger-bg)' : 'var(--gray-100)',
-                        color: asset.status === 'ACTIVE' ? 'var(--success)' : 
-                               asset.status === 'MISSING' ? 'var(--danger)' : 'var(--gray-700)',
+                        fontWeight: 600,
+                        backgroundColor: asset.status === 'ACTIVE' ? '#dcfce7' : 
+                                       (asset.status === 'STALE' ? '#fef3c7' : 
+                                       (asset.status === 'MISSING' || asset.status === 'OFFLINE' ? '#fee2e2' : '#f3f4f6')),
+                        color: asset.status === 'ACTIVE' ? '#15803d' : 
+                               (asset.status === 'STALE' ? '#b45309' : 
+                               (asset.status === 'MISSING' || asset.status === 'OFFLINE' ? '#b91c1c' : '#4b5563')),
                       }}>
                         {asset.status}
                       </span>

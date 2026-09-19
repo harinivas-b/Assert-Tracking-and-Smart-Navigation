@@ -17,28 +17,36 @@ const Tracking = () => {
   const { status: sseStatus, subscribe } = useRealtime();
   const [hardwareObs, setHardwareObs] = useState<Record<string, any>>({});
 
-  const fetchData = async () => {
-    try {
-      if (isDemoMode) {
-        setIsLoading(false);
-        return;
-      }
-      const [bRes, assetsData] = await Promise.all([
-        apiClient.get('/hierarchy/buildings'),
-        assetsApi.getAssets()
-      ]);
-      setBuildings(bRes.data || []);
-      setAssets(assetsData || []);
-    } catch (err) {
-      console.error('Error fetching live tracking data:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const fetchData = async () => {
+      try {
+        if (isDemoMode) {
+          setIsLoading(false);
+          return;
+        }
+        const [bRes, assetsData] = await Promise.all([
+          apiClient.get('/hierarchy/buildings'),
+          assetsApi.getAssets()
+        ]);
+        setBuildings(bRes.data || []);
+        setAssets(assetsData || []);
+      } catch (err) {
+        console.error('Error fetching live tracking data:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
     fetchData();
-    if (isDemoMode) return;
+
+    // Auto-poll every 6 seconds to keep locations and freshness status live
+    const pollTimer = setInterval(() => {
+      fetchData();
+    }, 6000);
+
+    if (isDemoMode) {
+      return () => clearInterval(pollTimer);
+    }
 
     const unsubLocation = subscribe('asset.location.updated', (data) => {
       setAssets(prev => {
@@ -64,6 +72,7 @@ const Tracking = () => {
     });
 
     return () => {
+      clearInterval(pollTimer);
       unsubLocation();
       unsubHardware();
     };
@@ -92,7 +101,7 @@ const Tracking = () => {
   });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <div>
           <h1>Live Tracking</h1>
@@ -123,7 +132,7 @@ const Tracking = () => {
          </div>
       )}
 
-      <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
+      <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'visible' }}>
         {/* Filters Top Bar */}
         <div style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', gap: '1rem' }}>
           {isDemoMode ? (
@@ -171,7 +180,7 @@ const Tracking = () => {
 
         {/* View Mode: Map */}
         {viewMode === 'map' ? (
-          <div style={{ flex: 1, backgroundColor: 'var(--gray-50)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '500px', padding: '1.5rem' }}>
+          <div style={{ flex: 1, backgroundColor: 'var(--gray-50)', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: '520px', padding: '1.5rem', overflowY: 'auto' }}>
             {isDemoMode ? (
               /* Mock Schematic Map */
               <div style={{ 
@@ -200,13 +209,13 @@ const Tracking = () => {
             ) : (
               /* Real Live Schematic Map */
               <div style={{ 
-                width: '90%', 
-                height: '90%', 
+                width: '100%', 
+                minHeight: '480px', 
                 border: '2px dashed var(--gray-300)',
                 borderRadius: 'var(--radius-md)',
                 position: 'relative',
                 backgroundColor: 'white',
-                padding: '2rem',
+                padding: '1.5rem',
                 display: 'flex',
                 flexDirection: 'column'
               }}>
@@ -284,8 +293,8 @@ const Tracking = () => {
                                     width: '10px',
                                     height: '10px',
                                     borderRadius: '50%',
-                                    backgroundColor: 'var(--primary)',
-                                    boxShadow: '0 0 0 3px var(--primary-light)',
+                                    backgroundColor: asset.status === 'ACTIVE' ? '#16a34a' : (asset.status === 'STALE' ? '#f59e0b' : '#9ca3af'),
+                                    boxShadow: `0 0 0 3px ${asset.status === 'ACTIVE' ? '#bbf7d0' : (asset.status === 'STALE' ? '#fef3c7' : '#e5e7eb')}`,
                                     flexShrink: 0
                                   }} />
                                   <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--gray-800)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -367,12 +376,14 @@ const Tracking = () => {
                         </td>
                         <td style={{ padding: '0.75rem' }}>
                           <span style={{
-                            padding: '0.25rem 0.5rem',
+                            padding: '0.25rem 0.625rem',
                             borderRadius: 'var(--radius-full)',
                             fontSize: '0.75rem',
-                            fontWeight: 500,
-                            backgroundColor: asset.status === 'ACTIVE' ? 'var(--success-bg)' : 'var(--gray-100)',
-                            color: asset.status === 'ACTIVE' ? 'var(--success)' : 'var(--gray-700)',
+                            fontWeight: 600,
+                            backgroundColor: asset.status === 'ACTIVE' ? '#dcfce7' : 
+                                           (asset.status === 'STALE' ? '#fef3c7' : '#fee2e2'),
+                            color: asset.status === 'ACTIVE' ? '#15803d' : 
+                                   (asset.status === 'STALE' ? '#b45309' : '#b91c1c'),
                           }}>
                             {asset.status}
                           </span>
