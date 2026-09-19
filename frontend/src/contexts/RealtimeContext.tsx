@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { useDemo } from './DemoContext';
+import { API_URL } from '../api/client';
 
 type ConnectionStatus = 'CONNECTING' | 'LIVE' | 'STALE' | 'OFFLINE';
 
@@ -48,7 +49,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
 
-    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+    const apiBase = API_URL;
 
     // Check initial freshness of BLE tracking data from the backend
     const checkInitialFreshness = async () => {
