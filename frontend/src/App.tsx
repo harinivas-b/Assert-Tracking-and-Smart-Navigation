@@ -18,7 +18,6 @@ import HardwareDebug from './pages/HardwareDebug';
 import Movements from './pages/Movements';
 import Alerts from './pages/Alerts';
 import IndoorNavigation from './pages/IndoorNavigation';
-import VoiceNavigationModule from './pages/VoiceNavigationModule';
 
 const App = () => {
   return (
@@ -46,7 +45,6 @@ const App = () => {
               <Route path="/movements" element={<Movements />} />
               <Route path="/alerts" element={<Alerts />} />
               <Route path="/navigation" element={<IndoorNavigation />} />
-              <Route path="/voice-navigation" element={<VoiceNavigationModule />} />
               
               {/* Catch all */}
               <Route path="*" element={<Navigate to="/" replace />} />

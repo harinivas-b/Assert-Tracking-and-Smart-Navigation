@@ -30,10 +30,6 @@ const Locations: React.FC = () => {
 
   useEffect(() => {
     fetchHierarchy();
-    const interval = setInterval(() => {
-      fetchHierarchy();
-    }, 8000);
-    return () => clearInterval(interval);
   }, []);
 
   const handleCreateBuilding = async (e: React.FormEvent) => {
@@ -256,15 +252,8 @@ const Locations: React.FC = () => {
                                         }}
                                       >
                                         <div style={{ fontWeight: 600, color: 'var(--gray-800)' }}>{asset.name}</div>
-                                        <div style={{
-                                          fontSize: '0.75rem',
-                                          backgroundColor: asset.status === 'ACTIVE' ? '#dcfce7' : (asset.status === 'STALE' ? '#fef3c7' : '#fee2e2'),
-                                          color: asset.status === 'ACTIVE' ? '#15803d' : (asset.status === 'STALE' ? '#b45309' : '#b91c1c'),
-                                          padding: '0.125rem 0.5rem',
-                                          borderRadius: '1rem',
-                                          fontWeight: 600
-                                        }}>
-                                          {asset.status}: {asset.assignment?.tracker?.identifier || 'Tagged'}
+                                        <div style={{ fontSize: '0.75rem', backgroundColor: '#dcfce7', color: '#15803d', padding: '0.125rem 0.5rem', borderRadius: '1rem', fontWeight: 600 }}>
+                                          {asset.assignment?.tracker?.identifier || 'Tagged'}
                                         </div>
                                       </div>
                                     ))}

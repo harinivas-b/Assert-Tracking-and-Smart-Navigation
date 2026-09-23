@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { prisma } from '../server';
+import prisma from '../server';
 import { findIndoorRoute } from '../services/navigationEngine';
 
 export const getNodes = async (req: Request, res: Response, next: NextFunction) => {

@@ -1,4 +1,4 @@
-import { prisma } from '../server';
+import prisma from '../server';
 import { realtimeService } from './realtimeService';
 
 export interface LocationEstimateResult {
@@ -32,9 +32,6 @@ export const processRawObservation = async (
   const cleanTrackerId = trackerIdOrMac.trim().toUpperCase();
   const cleanGatewayId = gatewayId.trim().toUpperCase();
 
-  const observationTimestamp = rawMetadata?.reportedAt ? new Date(rawMetadata.reportedAt) : new Date();
-  const validObsTime = isNaN(observationTimestamp.getTime()) ? new Date() : observationTimestamp;
-
   const gateway = await prisma.bLEGateway.findUnique({
     where: { gatewayId: cleanGatewayId },
     include: { building: true, floor: true, room: true, zone: true }
@@ -45,24 +42,13 @@ export const processRawObservation = async (
     return { processed: false };
   }
 
-  if (!gateway.lastSeen || validObsTime > new Date(gateway.lastSeen)) {
-    const isNowOnline = (Date.now() - validObsTime.getTime()) / 1000 <= (gateway.heartbeatTimeoutSec || 90);
-    await prisma.bLEGateway.update({
-      where: { id: gateway.id },
-      data: {
-        lastSeen: validObsTime,
-        status: isNowOnline ? 'ONLINE' : 'OFFLINE'
-      }
-    });
-    realtimeService.broadcast('gateway.status', {
-      gatewayId: gateway.gatewayId,
-      status: isNowOnline ? 'ONLINE' : 'OFFLINE',
-      lastSeen: validObsTime.toISOString()
-    });
-  }
+  await prisma.bLEGateway.update({
+    where: { id: gateway.id },
+    data: { lastSeen: new Date(), status: 'ONLINE' }
+  });
 
   const macName = rawMetadata?.macName ? String(rawMetadata.macName).trim().toUpperCase() : undefined;
-  let tracker = await prisma.tracker.findFirst({
+  const tracker = await prisma.tracker.findFirst({
     where: {
       OR: [
         { identifier: cleanTrackerId },
@@ -70,67 +56,43 @@ export const processRawObservation = async (
         ...(macName ? [{ identifier: macName }] : [])
       ]
     },
-    include: { assignment: { include: { asset: true } } }
+    include: { assignment: true }
   });
 
   if (!tracker) {
-    console.log(`[LocationEngine] Registering new BLE hardware tracker: ${cleanTrackerId} (Name: ${macName || 'N/A'}) via Gateway ${cleanGatewayId}`);
-    tracker = await prisma.tracker.create({
-      data: {
-        identifier: cleanTrackerId,
-        identifierType: 'MAC',
-        type: 'SMART',
-        status: 'ACTIVE',
-        lastSeen: new Date()
-      },
-      include: { assignment: { include: { asset: true } } }
-    });
-
-    // Automatically associate with an asset if not already present
-    const assetDisplayName = macName || `BLE Asset (${cleanTrackerId.slice(-8)})`;
-    let asset = await prisma.asset.findFirst({
+    console.warn(`[LocationEngine] UNKNOWN BLE TAG DETECTED: ${cleanTrackerId} via Gateway ${cleanGatewayId}`);
+    
+    const recentAlert = await prisma.alert.findFirst({
       where: {
-        OR: [
-          { serialNumber: cleanTrackerId },
-          { name: assetDisplayName }
-        ]
+        type: 'UNKNOWN_TAG',
+        description: { contains: cleanTrackerId },
+        timestamp: { gte: new Date(now - 60000) }
       }
     });
 
-    if (!asset) {
-      asset = await prisma.asset.create({
+    if (!recentAlert) {
+      const newAlert = await prisma.alert.create({
         data: {
-          name: assetDisplayName,
-          category: macName?.includes('SCANNER') ? 'Medical Imaging' : (macName?.includes('ECG') ? 'Cardiology' : 'BLE Equipment'),
-          serialNumber: cleanTrackerId,
-          department: 'Biomedical / General',
-          status: 'ACTIVE',
-          estimatedBuildingId: gateway.buildingId,
-          estimatedFloorId: gateway.floorId,
-          estimatedRoomId: gateway.roomId,
-          locationConfidence: 100,
-          lastLocationUpdate: new Date(),
-          assignment: {
-            create: { trackerId: tracker.id }
-          }
+          type: 'UNKNOWN_TAG',
+          severity: 'MEDIUM',
+          description: `Unknown BLE Tag detected: ${cleanTrackerId} (RSSI: ${rssi} dBm)`,
+          location: gateway.room ? `${gateway.building?.name || ''} - ${gateway.room.name}` : cleanGatewayId,
         }
       });
-      console.log(`[LocationEngine] Created asset "${assetDisplayName}" for tracker ${cleanTrackerId}`);
-    } else {
-      // Connect existing asset with this tracker if not assigned
-      const existingAssign = await prisma.assetTrackerAssignment.findUnique({ where: { assetId: asset.id } });
-      if (!existingAssign) {
-        await prisma.assetTrackerAssignment.create({
-          data: { assetId: asset.id, trackerId: tracker.id }
-        });
-      }
+
+      realtimeService.broadcast('alert.created', newAlert);
     }
 
-    // Refresh tracker with assignment
-    tracker = (await prisma.tracker.findUnique({
-      where: { id: tracker.id },
-      include: { assignment: { include: { asset: true } } }
-    }))!;
+    realtimeService.broadcast('unknown.tag', {
+      tagIdentifier: cleanTrackerId,
+      gatewayId: cleanGatewayId,
+      rssi,
+      locationName: gateway.room?.name || gateway.name,
+      timestamp: new Date().toISOString(),
+      metadata: rawMetadata
+    });
+
+    return { processed: true, isUnknownTag: true };
   }
 
   let batteryLevel: number | undefined;
@@ -150,7 +112,7 @@ export const processRawObservation = async (
   }
 
   const trackerUpdateData: any = {
-    lastSeen: validObsTime,
+    lastSeen: new Date(),
     status: (batteryLevel !== undefined && batteryLevel < 20) ? 'LOW_BATTERY' : 'ACTIVE'
   };
   if (batteryLevel !== undefined) {
@@ -167,7 +129,7 @@ export const processRawObservation = async (
       gatewayId: gateway.gatewayId,
       trackerId: tracker.identifier,
       rssi,
-      timestamp: validObsTime,
+      timestamp: new Date(),
       metadata: rawMetadata || {}
     }
   });
@@ -177,10 +139,8 @@ export const processRawObservation = async (
     gatewayName: gateway.name,
     roomName: gateway.room?.name || 'Unassigned',
     trackerIdentifier: tracker.identifier,
-    macName: macName || tracker.identifier,
     rssi,
-    status: trackerUpdateData.status,
-    timestamp: validObsTime.toISOString(),
+    timestamp: new Date().toISOString(),
     metadata: rawMetadata
   });
 
@@ -205,7 +165,7 @@ export const processRawObservation = async (
   const estimate = await calculateSmoothedLocationEstimate(tracker.identifier, assetId);
 
   if (estimate) {
-    await applyLocationEstimate(estimate, validObsTime);
+    await applyLocationEstimate(estimate);
   }
 
   return { processed: true, isUnknownTag: false, estimate };
@@ -252,7 +212,7 @@ const calculateSmoothedLocationEstimate = async (
   };
 };
 
-export const applyLocationEstimate = async (estimate: LocationEstimateResult, observationTime?: Date) => {
+export const applyLocationEstimate = async (estimate: LocationEstimateResult) => {
   const asset: any = await prisma.asset.findUnique({
     where: { id: estimate.assetId },
     include: { assignment: { include: { tracker: true } } }
@@ -260,7 +220,6 @@ export const applyLocationEstimate = async (estimate: LocationEstimateResult, ob
 
   if (!asset) return;
 
-  const eventTime = observationTime || new Date();
   const previousRoomId = asset.estimatedRoomId;
   const newRoomId = estimate.roomId;
 
@@ -283,31 +242,17 @@ export const applyLocationEstimate = async (estimate: LocationEstimateResult, ob
     }
   }
 
-  if (previousRoomId && newRoomId && previousRoomId !== newRoomId) {
-    // Check for duplicate recent movement event (same asset, same fromRoomId, same toRoomId within 15 seconds)
-    const lastMovement = await prisma.movementEvent.findFirst({
-      where: { assetId: asset.id },
-      orderBy: { timestamp: 'desc' }
+  if (previousRoomId !== newRoomId) {
+    await prisma.movementEvent.create({
+      data: {
+        assetId: asset.id,
+        fromRoomId: previousRoomId,
+        toRoomId: newRoomId,
+        fromZoneId: asset.estimatedZoneId,
+        toZoneId: estimate.zoneId,
+        confidence: estimate.confidence
+      }
     });
-
-    const isDuplicate = lastMovement &&
-      lastMovement.fromRoomId === previousRoomId &&
-      lastMovement.toRoomId === newRoomId &&
-      Math.abs(eventTime.getTime() - new Date(lastMovement.timestamp).getTime()) < 15000;
-
-    if (!isDuplicate) {
-      await prisma.movementEvent.create({
-        data: {
-          assetId: asset.id,
-          fromRoomId: previousRoomId,
-          toRoomId: newRoomId,
-          fromZoneId: asset.estimatedZoneId,
-          toZoneId: estimate.zoneId,
-          confidence: estimate.confidence,
-          timestamp: eventTime
-        }
-      });
-    }
 
     if (estimate.zoneId) {
       await checkGeofencingRules(asset.id, estimate.zoneId, newRoomId);
@@ -322,7 +267,7 @@ export const applyLocationEstimate = async (estimate: LocationEstimateResult, ob
       estimatedRoomId: estimate.roomId,
       estimatedZoneId: estimate.zoneId,
       locationConfidence: estimate.confidence,
-      lastLocationUpdate: eventTime,
+      lastLocationUpdate: new Date(),
     }
   });
 
@@ -334,8 +279,7 @@ export const applyLocationEstimate = async (estimate: LocationEstimateResult, ob
       roomId: estimate.roomId,
       zoneId: estimate.zoneId,
       confidence: estimate.confidence,
-      sources: estimate.sources,
-      timestamp: eventTime
+      sources: estimate.sources
     }
   });
 
@@ -350,7 +294,7 @@ export const applyLocationEstimate = async (estimate: LocationEstimateResult, ob
     newRoomId: newRoom?.id || null,
     newRoomName: newRoom?.name || 'Unassigned',
     confidence: estimate.confidence,
-    timestamp: eventTime.toISOString()
+    timestamp: new Date().toISOString()
   });
 };
 

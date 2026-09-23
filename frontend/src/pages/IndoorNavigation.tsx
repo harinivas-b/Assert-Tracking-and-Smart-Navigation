@@ -12,17 +12,8 @@ const IndoorNavigation: React.FC = () => {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [isVoiceOutputEnabled, setIsVoiceOutputEnabled] = useState(true);
   const [statusMessage, setStatusMessage] = useState('Tap the giant Microphone or select destination to start voice navigation.');
-  const [nodes, setNodes] = useState<any[]>([]);
 
   const recognitionRef = useRef<any>(null);
-
-  useEffect(() => {
-    apiClient.get('/navigation/nodes').then(res => {
-      if (res.data && res.data.length > 0) {
-        setNodes(res.data);
-      }
-    }).catch(console.error);
-  }, []);
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -74,15 +65,12 @@ const IndoorNavigation: React.FC = () => {
     } else if (textLower.includes('idea') || textLower.includes('idea lab')) {
       setDestination('NODE_IDEALAB');
       calculateAndStartRoute('NODE_ENTRANCE', 'NODE_IDEALAB');
-    } else if (textLower.includes('room 2') || textLower.includes('room2')) {
-      setDestination('NODE_ROOM2');
-      calculateAndStartRoute('NODE_ENTRANCE', 'NODE_ROOM2');
     } else if (textLower.includes('entrance') || textLower.includes('main entrance')) {
       setDestination('NODE_ENTRANCE');
       calculateAndStartRoute('NODE_IDEALAB', 'NODE_ENTRANCE');
     } else {
-      setStatusMessage(`Unrecognized destination "${commandText}". Please say "Maker Space", "Idea Lab", or "Room 2".`);
-      speakText(`Unrecognized destination ${commandText}. Please try saying Maker Space, Idea Lab, or Room 2.`);
+      setStatusMessage(`Unrecognized destination "${commandText}". Please say "Maker Space" or "Idea Lab".`);
+      speakText(`Unrecognized destination ${commandText}. Please try saying Maker Space or Idea Lab.`);
     }
   };
 
@@ -249,18 +237,9 @@ const IndoorNavigation: React.FC = () => {
               onChange={(e) => setOrigin(e.target.value)}
               style={{ width: '100%', padding: '0.875rem', borderRadius: '0.5rem', backgroundColor: '#0f172a', color: 'white', border: '2px solid #475569', fontSize: '1rem', fontWeight: 600 }}
             >
-              {nodes.length > 0 ? (
-                nodes.map((n) => (
-                  <option key={n.nodeId} value={n.nodeId}>{n.name}</option>
-                ))
-              ) : (
-                <>
-                  <option value="NODE_ENTRANCE">Main Entrance</option>
-                  <option value="NODE_IDEALAB">Idea Lab</option>
-                  <option value="NODE_MAKERSPACE">Maker Space</option>
-                  <option value="NODE_ROOM2">Room 2</option>
-                </>
-              )}
+              <option value="NODE_ENTRANCE">Main Entrance</option>
+              <option value="NODE_IDEALAB">Idea Lab</option>
+              <option value="NODE_MAKERSPACE">Maker Space</option>
             </select>
           </div>
 
@@ -271,18 +250,9 @@ const IndoorNavigation: React.FC = () => {
               onChange={(e) => setDestination(e.target.value)}
               style={{ width: '100%', padding: '0.875rem', borderRadius: '0.5rem', backgroundColor: '#0f172a', color: 'white', border: '2px solid #475569', fontSize: '1rem', fontWeight: 600 }}
             >
-              {nodes.length > 0 ? (
-                nodes.map((n) => (
-                  <option key={n.nodeId} value={n.nodeId}>{n.name}</option>
-                ))
-              ) : (
-                <>
-                  <option value="NODE_ROOM2">Room 2</option>
-                  <option value="NODE_MAKERSPACE">Maker Space</option>
-                  <option value="NODE_IDEALAB">Idea Lab</option>
-                  <option value="NODE_ENTRANCE">Main Entrance</option>
-                </>
-              )}
+              <option value="NODE_MAKERSPACE">Maker Space</option>
+              <option value="NODE_IDEALAB">Idea Lab</option>
+              <option value="NODE_ENTRANCE">Main Entrance</option>
             </select>
           </div>
 

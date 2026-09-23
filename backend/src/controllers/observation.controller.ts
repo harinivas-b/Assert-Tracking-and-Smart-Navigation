@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { processRawObservation } from '../services/locationEngine';
 import { realtimeService } from '../services/realtimeService';
 import { thingspeakService } from '../services/thingspeakService';
-import { prisma } from '../server';
+import prisma from '../server';
 
 export const syncThingSpeak = async (req: Request, res: Response, next: NextFunction) => {
   try {

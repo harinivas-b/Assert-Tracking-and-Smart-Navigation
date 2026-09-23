@@ -8,9 +8,8 @@ import {
   Tag, 
   Activity, 
   Bell, 
-  Terminal,
-  Compass,
-  Volume2
+  Terminal, 
+  Compass
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -28,7 +27,6 @@ const Sidebar = () => {
     { name: 'Movement History', path: '/movements', icon: Activity },
     { name: 'Alerts', path: '/alerts', icon: Bell },
     { name: 'Indoor Navigation', path: '/navigation', icon: Compass },
-    { name: 'Voice Proximity Guidance', path: '/voice-navigation', icon: Volume2 },
   ];
 
   return (

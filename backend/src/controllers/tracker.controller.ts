@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { prisma } from '../server';
-import { computeTagStatus } from '../utils/freshness';
+import prisma from '../server';
 
 export const getTrackers = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -10,34 +9,11 @@ export const getTrackers = async (req: Request, res: Response, next: NextFunctio
           include: {
             asset: true
           }
-        },
-        observations: {
-          take: 1,
-          orderBy: { timestamp: 'desc' }
         }
       },
       orderBy: { identifier: 'asc' }
     });
-
-    const enriched = trackers.map(tracker => {
-      const dynamicStatus = computeTagStatus(tracker.lastSeen, tracker.batteryLevel);
-      const latestObs = (tracker as any).observations?.[0];
-      const obsMeta = latestObs?.metadata && typeof latestObs.metadata === 'object' ? (latestObs.metadata as any) : undefined;
-      const macName = obsMeta?.macName || tracker.assignment?.asset?.name;
-      const room = obsMeta?.room || (tracker.assignment?.asset ? (tracker.assignment.asset as any).roomName : undefined);
-
-      return {
-        ...tracker,
-        mac: tracker.identifier,
-        macName,
-        rssi: latestObs?.rssi,
-        room,
-        status: dynamicStatus,
-        rawStatus: tracker.status
-      };
-    });
-
-    res.json(enriched);
+    res.json(trackers);
   } catch (error) {
     next(error);
   }
@@ -62,13 +38,7 @@ export const getTrackerById = async (req: Request, res: Response, next: NextFunc
       return;
     }
 
-    const dynamicStatus = computeTagStatus(tracker.lastSeen, tracker.batteryLevel);
-
-    res.json({
-      ...tracker,
-      status: dynamicStatus,
-      rawStatus: tracker.status
-    });
+    res.json(tracker);
   } catch (error) {
     next(error);
   }

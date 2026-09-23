@@ -22,13 +22,8 @@ app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.get('/', (req: Request, res: Response) => {
-  res.json({ status: 'ok', service: 'tracking-backend' });
-});
-
 // API Routes
 app.use('/api/v1', v1Routes);
-app.use('/', v1Routes);
 
 // Global error handler
 app.use(errorHandler);
@@ -61,14 +56,7 @@ const startServer = async () => {
   }
 };
 
-if (!process.env.VERCEL) {
-  startServer();
-}
+startServer();
 
 export { app, prisma };
-export default app;
-
-module.exports = app;
-module.exports.app = app;
-module.exports.prisma = prisma;
-module.exports.default = app;
+export default prisma;

@@ -72,7 +72,7 @@ export interface Tracker {
   identifier: string; // MAC or other BLE ID
   identifierType: string;
   type: 'SMART' | 'NON_SMART';
-  status: 'ACTIVE' | 'INACTIVE' | 'LOST' | 'LOW_BATTERY' | 'STALE' | 'OFFLINE';
+  status: 'ACTIVE' | 'INACTIVE' | 'LOST' | 'LOW_BATTERY';
   batteryLevel?: number;
   lastSeen?: string;
   assignment?: AssetTrackerAssignment;
@@ -85,7 +85,7 @@ export interface Asset {
   serialNumber?: string;
   department?: string;
   owner?: string;
-  status: 'ACTIVE' | 'IN_USE' | 'STORED' | 'MISSING' | 'MAINTENANCE' | 'DECOMMISSIONED' | 'STALE' | 'OFFLINE';
+  status: 'ACTIVE' | 'IN_USE' | 'STORED' | 'MISSING' | 'MAINTENANCE' | 'DECOMMISSIONED';
   
   estimatedBuildingId?: string;
   estimatedFloorId?: string;
