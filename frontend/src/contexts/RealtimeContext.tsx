@@ -48,7 +48,7 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
 
-    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+    const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1').replace(/\/+$/, '');
 
     const connectSSE = () => {
       setStatus('CONNECTING');
