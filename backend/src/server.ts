@@ -11,6 +11,10 @@ dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3000;
+if (process.env.DATABASE_URL?.startsWith('postgres')) {
+  const separator = process.env.DATABASE_URL.includes('?') ? '&' : '?';
+  process.env.DATABASE_URL += `${separator}connection_limit=1&pool_timeout=20`;
+}
 const prisma = new PrismaClient();
 let databaseReady: Promise<void> | null = null;
 
