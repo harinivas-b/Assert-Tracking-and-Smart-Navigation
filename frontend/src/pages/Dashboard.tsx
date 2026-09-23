@@ -54,12 +54,21 @@ const Dashboard = () => {
           ]);
         } else {
           // Real data fetching
-          const [assets, gateways, tags, alerts] = await Promise.all([
+          const results = await Promise.allSettled([
             assetsApi.getAssets(),
             hardwareApi.getGateways(),
             hardwareApi.getTrackers(),
             alertsApi.getAlerts()
           ]);
+
+          const [assetsResult, gatewaysResult, tagsResult, alertsResult] = results;
+          const assets = assetsResult.status === 'fulfilled' ? assetsResult.value : [];
+          const gateways = gatewaysResult.status === 'fulfilled' ? gatewaysResult.value : [];
+          const tags = tagsResult.status === 'fulfilled' ? tagsResult.value : [];
+          const alerts = alertsResult.status === 'fulfilled' ? alertsResult.value : [];
+          const failedSources = results
+            .map((result, index) => result.status === 'rejected' ? ['assets', 'gateways', 'trackers', 'alerts'][index] : null)
+            .filter(Boolean);
 
           const activeAlerts = (alerts || []).filter((al: any) => al.status !== 'RESOLVED');
 
@@ -72,9 +81,12 @@ const Dashboard = () => {
             activeAlerts: activeAlerts.length
           });
           setRecentAlerts((alerts || []).slice(0, 5));
+          if (failedSources.length > 0) {
+            setError(`Unable to load: ${failedSources.join(', ')}. Other dashboard data is still available.`);
+          }
         }
       } catch (err: any) {
-        setError(err.message || 'Failed to load dashboard data. Is the database connected?');
+        setError(err.message || 'Unable to load dashboard data. Please try again.');
       } finally {
         if (isInitial) {
           setIsLoading(false);
@@ -141,9 +153,9 @@ const Dashboard = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--danger)' }}>
             <AlertTriangle size={24} />
             <div>
-              <h3 style={{ margin: 0, color: 'var(--danger)' }}>Database Connection Required</h3>
+              <h3 style={{ margin: 0, color: 'var(--danger)' }}>Some dashboard data is unavailable</h3>
               <p style={{ margin: 0, fontSize: '0.875rem' }}>{error}</p>
-              <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.875rem' }}>Enable Demo Mode in the top bar to view the UI with simulated data.</p>
+              <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.875rem' }}>Check your connection or refresh the page to retry.</p>
             </div>
           </div>
         </div>
