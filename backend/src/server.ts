@@ -56,7 +56,9 @@ const startServer = async () => {
   }
 };
 
-startServer();
+if (require.main === module) {
+  startServer();
+}
 
 export { app, prisma };
-export default prisma;
+export default app;
