@@ -12,6 +12,14 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 const prisma = new PrismaClient();
+let databaseReady: Promise<void> | null = null;
+
+const ensureDatabaseReady = () => {
+  if (!databaseReady) {
+    databaseReady = prisma.$connect().then(() => seedDatabase(prisma));
+  }
+  return databaseReady;
+};
 
 // Middleware
 app.use(cors());
@@ -20,6 +28,16 @@ app.use(express.json());
 // Basic health check endpoint
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Vercel invokes the exported app without running the local server bootstrap.
+app.use('/api/v1', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await ensureDatabaseReady();
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 
 // API Routes
@@ -31,11 +49,8 @@ app.use(errorHandler);
 // Start server
 const startServer = async () => {
   try {
-    await prisma.$connect();
+    await ensureDatabaseReady();
     console.log('Database connected successfully');
-    
-    // Automatically seed initial hierarchy and navigation graph
-    await seedDatabase(prisma);
 
     // Initialize ThingSpeak background synchronization
     await thingspeakService.initialize();

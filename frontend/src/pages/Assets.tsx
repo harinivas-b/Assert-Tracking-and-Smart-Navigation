@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useDemo } from '../contexts/DemoContext';
 import { assetsApi } from '../api/assets';
 import type { Asset } from '../types';
@@ -9,6 +9,10 @@ const Assets = () => {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [newAsset, setNewAsset] = useState({ name: '', category: '', serialNumber: '', department: '', owner: '' });
 
   useEffect(() => {
     let isInitial = true;
@@ -63,6 +67,32 @@ const Assets = () => {
     (a.department && a.department.toLowerCase().includes(search.toLowerCase()))
   );
 
+  const createAsset = async (event: FormEvent) => {
+    event.preventDefault();
+    setCreateError('');
+    setIsSaving(true);
+    try {
+      if (isDemoMode) {
+        setAssets(current => [{ ...newAsset, id: `demo-${Date.now()}`, status: 'ACTIVE' }, ...current] as Asset[]);
+      } else {
+        const created = await assetsApi.createAsset({
+          ...newAsset,
+          serialNumber: newAsset.serialNumber || undefined,
+          category: newAsset.category || undefined,
+          department: newAsset.department || undefined,
+          owner: newAsset.owner || undefined,
+        });
+        setAssets(current => [created, ...current]);
+      }
+      setNewAsset({ name: '', category: '', serialNumber: '', department: '', owner: '' });
+      setIsCreateOpen(false);
+    } catch (error: any) {
+      setCreateError(error?.message || 'Unable to create asset');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
@@ -70,10 +100,37 @@ const Assets = () => {
           <h1>Assets</h1>
           <p className="text-muted">Manage tracked assets and assignments</p>
         </div>
-        <button className="btn btn-primary">
+        <button className="btn btn-primary" onClick={() => { setCreateError(''); setIsCreateOpen(true); }}>
           <Plus size={16} /> Add Asset
         </button>
       </div>
+
+      {isCreateOpen && (
+        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)', display: 'grid', placeItems: 'center', zIndex: 20, padding: '1rem' }}>
+          <form onSubmit={createAsset} className="card" style={{ width: 'min(100%, 30rem)', maxWidth: '30rem', padding: '1.5rem' }}>
+            <h2 style={{ marginTop: 0 }}>Add Asset</h2>
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              {([
+                ['name', 'Name', true],
+                ['category', 'Category', false],
+                ['serialNumber', 'Serial number', false],
+                ['department', 'Department', false],
+                ['owner', 'Owner', false],
+              ] as const).map(([field, label, required]) => (
+                <label key={field} style={{ display: 'grid', gap: '0.3rem' }}>
+                  <span>{label}</span>
+                  <input className="form-control" required={required} value={newAsset[field]} onChange={event => setNewAsset(current => ({ ...current, [field]: event.target.value }))} />
+                </label>
+              ))}
+            </div>
+            {createError && <p style={{ color: 'var(--danger)', marginBottom: 0 }}>{createError}</p>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.25rem' }}>
+              <button type="button" className="btn btn-outline" onClick={() => setIsCreateOpen(false)}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={isSaving}>{isSaving ? 'Saving...' : 'Create Asset'}</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <div className="card">
         <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem' }}>
