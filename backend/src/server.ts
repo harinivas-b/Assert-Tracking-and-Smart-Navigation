@@ -30,16 +30,6 @@ app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Vercel invokes the exported app without running the local server bootstrap.
-app.use('/api/v1', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    await ensureDatabaseReady();
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
-
 // API Routes
 app.use('/api/v1', v1Routes);
 
