@@ -4,9 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "prisma db push && nodemon src/server.ts",
-    "build": "prisma generate && prisma db push && tsc",
-    "start": "prisma db push && node dist/server.js",
+    "dev": "nodemon src/server.ts",
+    "build": "prisma generate && tsc",
+    "start": "node dist/server.js",
     "test": "jest --runInBand"
   },
   "keywords": [],
