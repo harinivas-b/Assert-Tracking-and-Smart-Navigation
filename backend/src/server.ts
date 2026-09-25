@@ -1,0 +1,73 @@
+import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { PrismaClient } from '@prisma/client';
+import { errorHandler } from './middleware/errorHandler';
+import v1Routes from './routes/v1';
+import { seedDatabase } from './utils/seed';
+import { thingspeakService } from './services/thingspeakService';
+
+dotenv.config();
+
+const app = express();
+const port = process.env.PORT || 3000;
+if (process.env.DATABASE_URL?.startsWith('postgres')) {
+  const separator = process.env.DATABASE_URL.includes('?') ? '&' : '?';
+  process.env.DATABASE_URL += `${separator}connection_limit=1&pool_timeout=20`;
+}
+const prisma = new PrismaClient();
+let databaseReady: Promise<void> | null = null;
+
+const ensureDatabaseReady = () => {
+  if (!databaseReady) {
+    databaseReady = prisma.$connect().then(() => seedDatabase(prisma));
+  }
+  return databaseReady;
+};
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Basic health check endpoint
+app.get('/health', (req: Request, res: Response) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// API Routes
+app.use('/api/v1', v1Routes);
+
+// Global error handler
+app.use(errorHandler);
+
+// Start server
+const startServer = async () => {
+  try {
+    await ensureDatabaseReady();
+    console.log('Database connected successfully');
+
+    // Initialize ThingSpeak background synchronization
+    await thingspeakService.initialize();
+    const tsChannelId = process.env.THINGSPEAK_CHANNEL_ID?.trim();
+    if (tsChannelId) {
+      const pollInterval = parseInt(process.env.THINGSPEAK_POLL_INTERVAL_MS || '15000', 10);
+      thingspeakService.startPolling(pollInterval);
+    } else {
+      console.log('[ThingSpeakService] THINGSPEAK_CHANNEL_ID not yet configured in .env. Automatic polling will activate once configured.');
+    }
+
+    app.listen(port, () => {
+      console.log(`Server running on port ${port}`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+if (require.main === module) {
+  startServer();
+}
+
+export { app, prisma };
+export default app;
